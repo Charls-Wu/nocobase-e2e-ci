@@ -1,0 +1,135 @@
+name: NocoBase E2E Worker
+
+run-name: E2E ${{ inputs.targets }} @ ${{ inputs.nocobase_version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: "'*' for all packages, or comma-separated E2E package names"
+        required: true
+        default: plugin-block-iframe
+      nocobase_version:
+        description: "NocoBase Docker version/tag, for example: next, develop, main, pr-123"
+        required: true
+        default: next
+      e2e_repo:
+        description: "Private E2E repository to checkout"
+        required: true
+        default: nocobase/e2e
+      e2e_ref:
+        description: "Branch, tag, or SHA in the E2E repository"
+        required: true
+        default: main
+      nocobase_docker_image:
+        description: "Optional override for vars.NOCOBASE_DOCKER_IMAGE"
+        required: false
+        default: ""
+      docker_registry:
+        description: "Optional override for vars.DOCKER_REGISTRY"
+        required: false
+        default: ""
+      dry_run:
+        description: "Resolve targets only; do not install dependencies or run tests"
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TARGETS: ${{ inputs.targets }}
+      NOCOBASE_DOCKER_VERSION: ${{ inputs.nocobase_version }}
+      NOCOBASE_DOCKER_IMAGE: ${{ inputs.nocobase_docker_image || vars.NOCOBASE_DOCKER_IMAGE }}
+      DOCKER_REGISTRY: ${{ inputs.docker_registry || vars.DOCKER_REGISTRY }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      DRY_RUN: ${{ inputs.dry_run }}
+
+    steps:
+      - name: Checkout worker repo
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        env:
+          NOCOBASE_E2E_TOKEN: ${{ secrets.NOCOBASE_E2E_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=0
+          require() {
+            local name="$1"
+            local value="${!name:-}"
+            if [ -z "$value" ]; then
+              echo "::error::Missing required configuration: $name"
+              missing=1
+            fi
+          }
+
+          require NOCOBASE_E2E_TOKEN
+
+          if [ "$DRY_RUN" != "true" ]; then
+            require DOCKER_REGISTRY
+            require DOCKER_USERNAME
+            require DOCKER_PASSWORD
+            require NOCOBASE_DOCKER_IMAGE
+            require NOCOBASE_DOCKER_VERSION
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+          echo "Configuration OK"
+
+      - name: Checkout E2E repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.e2e_repo }}
+          ref: ${{ inputs.e2e_ref }}
+          path: e2e
+          token: ${{ secrets.NOCOBASE_E2E_TOKEN }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve E2E targets
+        id: resolve-targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/resolve-targets.mjs \
+            --repo-dir e2e \
+            --targets "$TARGETS" \
+            --output "$RUNNER_TEMP/e2e-targets.txt" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Print dry-run summary
+        if: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Dry run enabled. Resolved packages:"
+          cat "$RUNNER_TEMP/e2e-targets.txt"
+          echo
+          echo "No dependencies were installed and no tests were executed."
+
+      - name: Install E2E dependencies
+        if: ${{ !inputs.dry_run }}
+        working-directory: e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g yarn
+          yarn install
+
+      - name: Run selected E2E packages
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: scripts/run-targets.sh "$RUNNER_TEMP/e2e-targets.txt"
