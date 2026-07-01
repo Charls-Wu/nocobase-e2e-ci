@@ -4,6 +4,26 @@
 
 当前只在 `Charls-Wu/nocobase-e2e-ci` 中保存原型脚本和测试，不修改 `2013xile/nocobase-ci`。
 
+重要边界：
+
+```text
+Charls-Wu/nocobase-e2e-ci
+  只是 E2E 执行器：
+  - 接收 targets / nocobase_version / e2e_ref
+  - checkout nocobase/e2e
+  - 跑测试、上传 artifact、发通知
+
+2013xile/nocobase-ci
+  才是上游调度和解析逻辑的正式落点：
+  - 读取 build-pro-image 输入
+  - 获取 changed files
+  - 解析 E2E targets
+  - 决定 e2e_ref
+  - 镜像成功后 dispatch E2E worker
+```
+
+`scripts/resolve-2013-build-e2e-targets.mjs` 当前放在本仓只是临时原型，方便验证规则和评审。正式接入时应迁移到 `2013xile/nocobase-ci`；迁移完成后，本仓可删除这部分上游解析原型，避免 worker 仓承担调度职责。
+
 ## 现有构建 worker 输入
 
 `2013xile/nocobase-ci/.github/workflows/build-pro-image.yml` 当前是 `workflow_dispatch`，主要输入为：
