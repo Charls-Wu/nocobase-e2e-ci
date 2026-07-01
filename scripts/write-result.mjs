@@ -44,6 +44,16 @@ const result = {
   packageName,
   conclusion: pickConclusion(outcomes),
   outcomes,
+  artifacts: {
+    playwrightReport: {
+      id: env('PLAYWRIGHT_REPORT_ARTIFACT_ID'),
+      url: env('PLAYWRIGHT_REPORT_ARTIFACT_URL'),
+    },
+    testResults: {
+      id: env('TEST_RESULTS_ARTIFACT_ID'),
+      url: env('TEST_RESULTS_ARTIFACT_URL'),
+    },
+  },
   targets: env('TARGETS'),
   nocobaseVersion: env('NOCOBASE_DOCKER_VERSION'),
   e2eRepo: env('E2E_REPO'),

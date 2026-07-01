@@ -16,6 +16,13 @@ It does not support `targets=changed`. Changed-file resolution is expected to ha
 
 Multiple packages run as separate matrix jobs with `fail-fast=false` and `max-parallel=10`. One failing package does not cancel the others. Each package uploads a result artifact, then the final notify job summarizes all package results.
 
+Each package also uploads Playwright artifacts:
+
+- `playwright-report-<package>`: HTML report zip. Download and unzip it, then open `index.html`.
+- `test-results-<package>`: Playwright attachments such as traces, screenshots, and videos when generated.
+
+Artifacts are retained for 7 days by default.
+
 ## Required Secrets
 
 Configure these repository secrets before running with `dry_run=false`:
@@ -38,6 +45,8 @@ FEISHU_SECRET
 ```
 
 `FEISHU_SECRET` is only needed when the Feishu custom bot enables signature verification. If `FEISHU_WEBHOOK_URL` is not configured, the workflow still writes the GitHub Actions summary and skips Feishu notification.
+
+The Feishu card includes the overall result, each package result, and GitHub artifact download links for the package reports when available.
 
 ## Required Variables
 

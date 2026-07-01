@@ -185,6 +185,26 @@ jobs:
         shell: bash
         run: scripts/run-target.sh "$PACKAGE_DIR"
 
+      - name: Upload Playwright HTML report
+        id: upload-playwright-report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.package_name }}
+          path: e2e/${{ matrix.package_dir }}/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Playwright test results
+        id: upload-test-results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package_name }}
+          path: e2e/${{ matrix.package_dir }}/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Write package result
         if: ${{ always() }}
         shell: bash
@@ -195,6 +215,10 @@ jobs:
           SETUP_NODE_OUTCOME: ${{ steps.setup-node.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           RUN_OUTCOME: ${{ steps.run.outcome }}
+          PLAYWRIGHT_REPORT_ARTIFACT_ID: ${{ steps.upload-playwright-report.outputs.artifact-id }}
+          PLAYWRIGHT_REPORT_ARTIFACT_URL: ${{ steps.upload-playwright-report.outputs.artifact-url }}
+          TEST_RESULTS_ARTIFACT_ID: ${{ steps.upload-test-results.outputs.artifact-id }}
+          TEST_RESULTS_ARTIFACT_URL: ${{ steps.upload-test-results.outputs.artifact-url }}
         run: node scripts/write-result.mjs
 
       - name: Upload package result

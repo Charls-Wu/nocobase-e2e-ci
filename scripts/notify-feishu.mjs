@@ -126,12 +126,16 @@ function markdownSummary(summary) {
     `- E2E ref: ${env('E2E_REPO')}@${env('E2E_REF')}`,
     `- run: ${runUrl}`,
     '',
-    '| Package | Result |',
-    '| --- | --- |',
+    '| Package | Result | Report | Test results |',
+    '| --- | --- | --- | --- |',
   ];
 
   for (const row of summary.rows) {
-    lines.push(`| ${row.packageName || row.packageDir} | ${icon(row.conclusion)} ${row.conclusion} |`);
+    const reportUrl = row.artifacts?.playwrightReport?.url;
+    const testResultsUrl = row.artifacts?.testResults?.url;
+    lines.push(
+      `| ${row.packageName || row.packageDir} | ${icon(row.conclusion)} ${row.conclusion} | ${reportUrl ? `[download](${reportUrl})` : '-'} | ${testResultsUrl ? `[download](${testResultsUrl})` : '-'} |`,
+    );
   }
 
   lines.push('');
@@ -146,7 +150,15 @@ function feishuSign(secret, timestamp) {
 function buildFeishuPayload(summary) {
   const runUrl = env('RUN_URL');
   const title = `NocoBase E2E ${summary.conclusion}`;
-  const resultLines = summary.rows.map((row) => `${icon(row.conclusion)} ${row.packageName || row.packageDir}: ${row.conclusion}`);
+  const resultLines = summary.rows.map((row) => {
+    const reportUrl = row.artifacts?.playwrightReport?.url;
+    const testResultsUrl = row.artifacts?.testResults?.url;
+    const links = [
+      reportUrl ? `[HTML报告](${reportUrl})` : '',
+      testResultsUrl ? `[测试附件](${testResultsUrl})` : '',
+    ].filter(Boolean);
+    return `${icon(row.conclusion)} ${row.packageName || row.packageDir}: ${row.conclusion}${links.length ? ` ${links.join(' ')}` : ''}`;
+  });
   const content = [
     `**镜像版本**: ${env('NOCOBASE_DOCKER_VERSION')}`,
     `**E2E 分支**: ${env('E2E_REPO')}@${env('E2E_REF')}`,
