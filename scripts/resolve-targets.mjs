@@ -102,6 +102,15 @@ function unique(items) {
   return result;
 }
 
+function toMatrix(resolved) {
+  return {
+    include: resolved.map((packagePath) => ({
+      package_dir: packagePath,
+      package_name: path.basename(packagePath),
+    })),
+  };
+}
+
 function writeGithubOutput(file, outputs) {
   if (!file) {
     return;
@@ -145,6 +154,8 @@ try {
   writeGithubOutput(githubOutputFile, {
     count: String(resolved.length),
     packages: resolved,
+    packages_json: JSON.stringify(resolved),
+    matrix: JSON.stringify(toMatrix(resolved)),
   });
 
   console.log(`Resolved ${resolved.length} E2E package(s):`);

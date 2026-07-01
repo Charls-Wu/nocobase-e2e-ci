@@ -9,10 +9,12 @@ This repository is only an executor. It does not store private E2E test code and
 The first version supports manual `workflow_dispatch` runs only:
 
 - `targets=plugin-block-iframe`: run one E2E package.
-- `targets=package-a,package-b`: run multiple E2E packages.
+- `targets=package-a,package-b`: run multiple E2E packages in a GitHub Actions matrix.
 - `targets=*`: run all packages in `nocobase/e2e/packages/*` that define `scripts.test:e2e`.
 
 It does not support `targets=changed`. Changed-file resolution is expected to happen in the upstream build/dispatch worker before this worker is triggered.
+
+Multiple packages run as separate matrix jobs with `fail-fast=false` and `max-parallel=10`. One failing package does not cancel the others. Each package uploads a result artifact, then the final notify job summarizes all package results.
 
 ## Required Secrets
 
@@ -25,6 +27,17 @@ DOCKER_PASSWORD
 ```
 
 `NOCOBASE_E2E_TOKEN` must be able to read the private `nocobase/e2e` repository.
+
+## Optional Feishu Secrets
+
+Configure these repository secrets to send one summary notification after all selected packages finish:
+
+```text
+FEISHU_WEBHOOK_URL
+FEISHU_SECRET
+```
+
+`FEISHU_SECRET` is only needed when the Feishu custom bot enables signature verification. If `FEISHU_WEBHOOK_URL` is not configured, the workflow still writes the GitHub Actions summary and skips Feishu notification.
 
 ## Required Variables
 
@@ -95,5 +108,14 @@ Then run the actual test:
 targets=plugin-block-iframe
 nocobase_version=next
 e2e_ref=<branch containing the package update>
+dry_run=false
+```
+
+To test matrix fan-out and summary behavior:
+
+```text
+targets=example-e2e,plugin-block-iframe
+nocobase_version=develop
+e2e_ref=develop
 dry_run=false
 ```

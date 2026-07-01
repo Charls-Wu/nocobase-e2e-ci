@@ -36,9 +36,13 @@ on:
         default: true
 
 jobs:
-  e2e:
+  resolve-targets:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 15
+    outputs:
+      count: ${{ steps.resolve-targets.outputs.count }}
+      packages_json: ${{ steps.resolve-targets.outputs.packages_json }}
+      matrix: ${{ steps.resolve-targets.outputs.matrix }}
     env:
       TARGETS: ${{ inputs.targets }}
       NOCOBASE_DOCKER_VERSION: ${{ inputs.nocobase_version }}
@@ -120,8 +124,54 @@ jobs:
           echo
           echo "No dependencies were installed and no tests were executed."
 
+  test:
+    needs: resolve-targets
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix: ${{ fromJson(needs.resolve-targets.outputs.matrix) }}
+    env:
+      TARGETS: ${{ inputs.targets }}
+      E2E_REPO: ${{ inputs.e2e_repo }}
+      E2E_REF: ${{ inputs.e2e_ref }}
+      NOCOBASE_DOCKER_VERSION: ${{ inputs.nocobase_version }}
+      NOCOBASE_DOCKER_IMAGE: ${{ inputs.nocobase_docker_image || vars.NOCOBASE_DOCKER_IMAGE }}
+      DOCKER_REGISTRY: ${{ inputs.docker_registry || vars.DOCKER_REGISTRY }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      PACKAGE_DIR: ${{ matrix.package_dir }}
+      PACKAGE_NAME: ${{ matrix.package_name }}
+
+    steps:
+      - name: Checkout worker repo
+        id: checkout-worker
+        uses: actions/checkout@v4
+
+      - name: Checkout E2E repo
+        id: checkout-e2e
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.e2e_repo }}
+          ref: ${{ inputs.e2e_ref }}
+          path: e2e
+          token: ${{ secrets.NOCOBASE_E2E_TOKEN }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        id: setup-node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Mark package start
+        shell: bash
+        run: echo "PACKAGE_STARTED_AT=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
       - name: Install E2E dependencies
-        if: ${{ !inputs.dry_run }}
+        id: install
         working-directory: e2e
         shell: bash
         run: |
@@ -129,7 +179,68 @@ jobs:
           npm install -g yarn
           yarn install
 
-      - name: Run selected E2E packages
-        if: ${{ !inputs.dry_run }}
+      - name: Run selected E2E package
+        id: run
+        continue-on-error: true
         shell: bash
-        run: scripts/run-targets.sh "$RUNNER_TEMP/e2e-targets.txt"
+        run: scripts/run-target.sh "$PACKAGE_DIR"
+
+      - name: Write package result
+        if: ${{ always() }}
+        shell: bash
+        env:
+          RESULT_FILE: ${{ runner.temp }}/e2e-result/result.json
+          CHECKOUT_WORKER_OUTCOME: ${{ steps.checkout-worker.outcome }}
+          CHECKOUT_E2E_OUTCOME: ${{ steps.checkout-e2e.outcome }}
+          SETUP_NODE_OUTCOME: ${{ steps.setup-node.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          RUN_OUTCOME: ${{ steps.run.outcome }}
+        run: node scripts/write-result.mjs
+
+      - name: Upload package result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-result-${{ matrix.package_name }}
+          path: ${{ runner.temp }}/e2e-result/result.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail package job when E2E failed
+        if: ${{ always() && steps.run.outcome != 'success' }}
+        shell: bash
+        run: |
+          echo "::error::E2E package failed: $PACKAGE_DIR"
+          exit 1
+
+  notify:
+    needs: [resolve-targets, test]
+    if: ${{ always() && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGETS: ${{ inputs.targets }}
+      TARGET_MATRIX: ${{ needs.resolve-targets.outputs.matrix }}
+      NOCOBASE_DOCKER_VERSION: ${{ inputs.nocobase_version }}
+      E2E_REPO: ${{ inputs.e2e_repo }}
+      E2E_REF: ${{ inputs.e2e_ref }}
+      RESOLVE_RESULT: ${{ needs.resolve-targets.result }}
+      TEST_RESULT: ${{ needs.test.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+      FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}
+
+    steps:
+      - name: Checkout worker repo
+        uses: actions/checkout@v4
+
+      - name: Download package results
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: e2e-result-*
+          path: results
+
+      - name: Summarize and notify Feishu
+        shell: bash
+        run: node scripts/notify-feishu.mjs --results-dir results --summary-file "$GITHUB_STEP_SUMMARY"
