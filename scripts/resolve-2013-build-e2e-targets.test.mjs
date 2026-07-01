@@ -57,14 +57,16 @@ function runCase({ branch = 'develop', repository, nocobasePrNumber = '', proPlu
   return JSON.parse(fs.readFileSync(output, 'utf8'));
 }
 
-assert.deepEqual(
-  runCase({
-    repository: 'nocobase',
-    nocobasePrNumber: '8743',
-    files: ['packages/plugins/@nocobase/plugin-block-iframe/src/server/plugin.ts'],
-  }).targetInput,
-  'plugin-block-iframe',
-);
+const mainPluginPr = runCase({
+  repository: 'nocobase',
+  nocobasePrNumber: '8743',
+  files: ['packages/plugins/@nocobase/plugin-block-iframe/src/server/plugin.ts'],
+});
+
+assert.equal(mainPluginPr.targetInput, 'plugin-block-iframe');
+assert.equal(mainPluginPr.e2eRef, 'develop');
+assert.equal(mainPluginPr.e2eRefSupported, true);
+assert.equal(mainPluginPr.shouldRun, true);
 
 assert.deepEqual(
   runCase({
@@ -109,5 +111,17 @@ assert.deepEqual(
     proPlugin: 'backups',
   },
 );
+
+const unsupportedBranch = runCase({
+  branch: 'v1',
+  repository: 'nocobase',
+  files: ['packages/plugins/@nocobase/plugin-block-iframe/src/server/plugin.ts'],
+});
+
+assert.equal(unsupportedBranch.e2eRef, 'v1');
+assert.equal(unsupportedBranch.e2eRefSupported, false);
+assert.equal(unsupportedBranch.shouldRun, false);
+assert.equal(unsupportedBranch.targetInput, '');
+assert.equal(unsupportedBranch.skippedReason, 'unsupported-e2e-ref');
 
 console.log('resolve-2013-build-e2e-targets tests passed');

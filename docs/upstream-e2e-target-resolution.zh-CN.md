@@ -139,6 +139,33 @@ src/server/plugin.ts
 
 解析出的 target 还需要和 `nocobase/e2e` 对应分支里的可执行包做交集。
 
+E2E 仓库只维护三个长期分支：
+
+```text
+main
+next
+develop
+```
+
+`2013xile/nocobase-ci` 触发 E2E worker 时，`e2e_ref` 统一取本次构建的 base branch，也就是 `inputs.branch`：
+
+```text
+主仓 PR base = develop  -> e2e_ref=develop
+主仓 PR base = main     -> e2e_ref=main
+主仓 PR base = next     -> e2e_ref=next
+
+pro-plugins PR base = develop -> e2e_ref=develop
+独立插件 PR base = main       -> e2e_ref=main
+
+develop 分支构建 -> e2e_ref=develop
+main 分支构建    -> e2e_ref=main
+next 分支构建    -> e2e_ref=next
+```
+
+PR 源分支名不参与 E2E 分支选择；不会要求 `nocobase/e2e` 创建 `pr-xxx` 分支。
+
+如果 `inputs.branch` 不是 `main`、`next`、`develop`，第一版直接跳过 E2E。
+
 可执行包定义：
 
 ```text
@@ -224,6 +251,8 @@ GitHub Actions 接入时使用：
 target_input
 should_run
 mode
+e2e_ref
+e2e_ref_supported
 ```
 
 ## 已验证样例
@@ -270,9 +299,10 @@ prepare-meta
 
 ```text
 1. 创建 GitHub App token
-2. checkout nocobase/e2e@e2e_ref 或只读取包列表
-3. 运行 resolve-2013-build-e2e-targets.mjs
-4. 输出 target_input / should_run
+2. 根据 inputs.branch 得到 e2e_ref；只支持 main / next / develop
+3. checkout nocobase/e2e@e2e_ref 或只读取包列表
+4. 运行 resolve-2013-build-e2e-targets.mjs
+5. 输出 target_input / should_run / e2e_ref
 ```
 
 2013 输入到来源仓库的对应关系：
@@ -337,11 +367,11 @@ resolve-e2e-targets.outputs.should_run == 'true'
 Charls-Wu/nocobase-e2e-ci/.github/workflows/e2e.yml
 targets = resolve-e2e-targets.outputs.target_input
 nocobase_version = needs.prepare-meta.outputs.imageTag
-e2e_ref = 主仓 PR 场景优先 pr-<nocobase_pr_number>，否则 branch
+e2e_ref = resolve-e2e-targets.outputs.e2e_ref
 dry_run = false
 ```
 
-说明：插件仓 PR 的 E2E 分支命名规则还没有最终确定，第一版先不强行推导，避免误跑不存在的分支。
+说明：PR 场景也使用 base branch 对应的 E2E 分支，不使用 `pr-xxx`。
 
 第一版建议拆成两次 PR：
 

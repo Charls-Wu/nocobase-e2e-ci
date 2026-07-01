@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const SUPPORTED_E2E_REFS = new Set(['main', 'next', 'develop']);
+
 function usage() {
   console.error(`Usage:
   node scripts/resolve-2013-build-e2e-targets.mjs \\
@@ -48,6 +50,13 @@ function clean(value) {
 
 function normalizeRepoName(repo) {
   return clean(repo).replace(/^nocobase\//, '');
+}
+
+function getE2ERef(branch) {
+  return {
+    e2eRef: branch,
+    e2eRefSupported: SUPPORTED_E2E_REFS.has(branch),
+  };
 }
 
 function deriveTrigger(args) {
@@ -171,6 +180,7 @@ try {
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nocobase-e2e-upstream-'));
   const trigger = deriveTrigger(args);
+  const e2e = getE2ERef(trigger.branch);
   const changedFiles = await collectChangedFiles(trigger, args, tempDir);
   const resolverScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'resolve-upstream-e2e-targets.mjs');
   const resolverOutput = path.join(tempDir, 'resolved-targets.json');
@@ -190,8 +200,13 @@ try {
   const resolved = JSON.parse(fs.readFileSync(resolverOutput, 'utf8'));
   const summary = {
     trigger,
+    e2eRef: e2e.e2eRef,
+    e2eRefSupported: e2e.e2eRefSupported,
+    skippedReason: e2e.e2eRefSupported ? '' : 'unsupported-e2e-ref',
     changedFilesSource: clean(args['changed-files']) ? 'provided-file' : 'github-api',
     ...resolved,
+    shouldRun: resolved.shouldRun && e2e.e2eRefSupported,
+    targetInput: e2e.e2eRefSupported ? resolved.targetInput : '',
   };
 
   if (args.output) {
@@ -203,6 +218,9 @@ try {
     mode: summary.mode,
     should_run: String(summary.shouldRun),
     target_input: summary.targetInput,
+    e2e_ref: summary.e2eRef,
+    e2e_ref_supported: String(summary.e2eRefSupported),
+    skipped_reason: summary.skippedReason,
     source_repo: summary.sourceRepo,
     source_full_name: trigger.sourceFullName,
     trigger_type: trigger.triggerType,
@@ -214,6 +232,11 @@ try {
   console.log(`Trigger type: ${trigger.triggerType}`);
   console.log(`Source repo: ${trigger.sourceFullName}`);
   console.log(`Base branch: ${trigger.branch}`);
+  console.log(`E2E ref: ${summary.e2eRef}`);
+  console.log(`E2E ref supported: ${summary.e2eRefSupported}`);
+  if (summary.skippedReason) {
+    console.log(`Skipped reason: ${summary.skippedReason}`);
+  }
   if (trigger.prNumber) {
     console.log(`PR number: ${trigger.prNumber}`);
   }

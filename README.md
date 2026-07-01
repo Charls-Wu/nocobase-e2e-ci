@@ -71,6 +71,7 @@ e2e_repo
 
 e2e_ref
   Branch, tag, or SHA in the E2E repository. Default: main.
+  For upstream CI dispatches, use the build base branch only: main, next, or develop.
 
 nocobase_docker_image
   Optional override for vars.NOCOBASE_DOCKER_IMAGE.
@@ -107,7 +108,7 @@ After configuring `NOCOBASE_E2E_TOKEN`, run a dry-run first:
 ```text
 targets=plugin-block-iframe
 nocobase_version=next
-e2e_ref=<branch containing the package update>
+e2e_ref=next
 dry_run=true
 ```
 
@@ -116,7 +117,7 @@ Then run the actual test:
 ```text
 targets=plugin-block-iframe
 nocobase_version=next
-e2e_ref=<branch containing the package update>
+e2e_ref=next
 dry_run=false
 ```
 
