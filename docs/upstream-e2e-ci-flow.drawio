@@ -74,7 +74,7 @@
         <mxCell id="r_main" value="主仓 nocobase/nocobase&#xa;&#xa;packages/plugins/@nocobase/&lt;plugin&gt;/**&#xa;  → &lt;plugin&gt;&#xa;&#xa;packages/core/**、构建、公共运行时代码&#xa;  → *&#xa;&#xa;例：plugin-block-iframe → plugin-block-iframe" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=12;fillColor=#dbeafe;strokeColor=#2563eb;fontColor=#0f172a;fontSize=13;fontFamily=Arial;" vertex="1" parent="c_rules">
           <mxGeometry x="30" y="75" width="485" height="230" as="geometry" />
         </mxCell>
-        <mxCell id="r_pro" value="pro-plugins&#xa;&#xa;@nocobase/&lt;plugin&gt;/**&#xa;  → &lt;plugin&gt;&#xa;&#xa;&lt;package&gt;/**&#xa;  → &lt;package&gt;&#xa;&#xa;根级或公共影响面不明确的变化&#xa;  → *" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=12;fillColor=#dcfce7;strokeColor=#16a34a;fontColor=#0f172a;fontSize=13;fontFamily=Arial;" vertex="1" parent="c_rules">
+        <mxCell id="r_pro" value="pro-plugins&#xa;&#xa;@nocobase/plugin-action-import-pro/src/**&#xa;  → plugin-action-import-pro&#xa;&#xa;external-db-data-source/src/**&#xa;  → external-db-data-source&#xa;&#xa;根级 package.json / 公共影响面不明确的变化&#xa;  → *" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=12;fillColor=#dcfce7;strokeColor=#16a34a;fontColor=#0f172a;fontSize=13;fontFamily=Arial;" vertex="1" parent="c_rules">
           <mxGeometry x="545" y="75" width="485" height="230" as="geometry" />
         </mxCell>
         <mxCell id="r_plugin" value="独立插件仓 nocobase/plugin-xxx&#xa;&#xa;任意非忽略代码变更&#xa;  → plugin-xxx&#xa;&#xa;例：nocobase/plugin-backups&#xa;  → plugin-backups&#xa;&#xa;如果 e2e 仓没有对应可执行包&#xa;  → missingTargets，不触发" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=12;fillColor=#fef3c7;strokeColor=#d97706;fontColor=#0f172a;fontSize=13;fontFamily=Arial;" vertex="1" parent="c_rules">
@@ -109,7 +109,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="edge_worker_repo" value="checkout e2e_ref" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#0284c7;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;fontFamily=Arial;" edge="1" parent="1" source="e_worker" target="e_repo">
+        <mxCell id="edge_worker_repo" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#0284c7;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;fontFamily=Arial;" edge="1" parent="1" source="e_worker" target="e_repo">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="edge_worker_run" value="targets / imageTag" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#16a34a;strokeWidth=2;fontSize=12;labelBackgroundColor=#ffffff;fontFamily=Arial;" edge="1" parent="1" source="e_worker" target="e_run">
