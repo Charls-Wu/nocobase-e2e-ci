@@ -1,6 +1,6 @@
 name: NocoBase E2E Worker
 
-run-name: E2E ${{ inputs.targets }} @ ${{ inputs.nocobase_version }}
+run-name: E2E ${{ inputs.targets }} @ ${{ inputs.nocobase_version }} ${{ inputs.dispatch_id }}
 
 on:
   workflow_dispatch:
@@ -34,6 +34,22 @@ on:
         required: true
         type: boolean
         default: true
+      dispatch_id:
+        description: "Optional caller-provided id used to correlate cross-repository dispatches"
+        required: false
+        default: ""
+      caller_repo:
+        description: "Optional caller repository, for example nocobase/e2e"
+        required: false
+        default: ""
+      caller_run_id:
+        description: "Optional caller GitHub Actions run id"
+        required: false
+        default: ""
+      caller_sha:
+        description: "Optional caller commit SHA"
+        required: false
+        default: ""
 
 jobs:
   resolve-targets:
@@ -251,6 +267,10 @@ jobs:
       RESOLVE_RESULT: ${{ needs.resolve-targets.result }}
       TEST_RESULT: ${{ needs.test.result }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DISPATCH_ID: ${{ inputs.dispatch_id }}
+      CALLER_REPO: ${{ inputs.caller_repo }}
+      CALLER_RUN_ID: ${{ inputs.caller_run_id }}
+      CALLER_SHA: ${{ inputs.caller_sha }}
       FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
       FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}
 

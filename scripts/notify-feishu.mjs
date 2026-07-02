@@ -118,6 +118,9 @@ function summarize(expectedPackages, resultFiles) {
 
 function markdownSummary(summary) {
   const runUrl = env('RUN_URL');
+  const callerRepo = env('CALLER_REPO');
+  const callerRunId = env('CALLER_RUN_ID');
+  const callerRunUrl = callerRepo && callerRunId ? `https://github.com/${callerRepo}/actions/runs/${callerRunId}` : '';
   const lines = [
     `# NocoBase E2E ${summary.conclusion}`,
     '',
@@ -125,10 +128,13 @@ function markdownSummary(summary) {
     `- image version: ${env('NOCOBASE_DOCKER_VERSION')}`,
     `- E2E ref: ${env('E2E_REPO')}@${env('E2E_REF')}`,
     `- run: ${runUrl}`,
+    env('DISPATCH_ID') ? `- dispatch id: ${env('DISPATCH_ID')}` : '',
+    callerRunUrl ? `- caller: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
+    env('CALLER_SHA') ? `- caller sha: ${env('CALLER_SHA')}` : '',
     '',
     '| Package | Result | Report | Test results |',
     '| --- | --- | --- | --- |',
-  ];
+  ].filter((line) => line !== '');
 
   for (const row of summary.rows) {
     const reportUrl = row.artifacts?.playwrightReport?.url;
@@ -150,6 +156,9 @@ function feishuSign(secret, timestamp) {
 function buildFeishuPayload(summary) {
   const runUrl = env('RUN_URL');
   const title = `NocoBase E2E ${summary.conclusion}`;
+  const callerRepo = env('CALLER_REPO');
+  const callerRunId = env('CALLER_RUN_ID');
+  const callerRunUrl = callerRepo && callerRunId ? `https://github.com/${callerRepo}/actions/runs/${callerRunId}` : '';
   const resultLines = summary.rows.map((row) => {
     const reportUrl = row.artifacts?.playwrightReport?.url;
     const testResultsUrl = row.artifacts?.testResults?.url;
@@ -163,9 +172,12 @@ function buildFeishuPayload(summary) {
     `**镜像版本**: ${env('NOCOBASE_DOCKER_VERSION')}`,
     `**E2E 分支**: ${env('E2E_REPO')}@${env('E2E_REF')}`,
     `**触发目标**: ${env('TARGETS')}`,
+    env('DISPATCH_ID') ? `**Dispatch ID**: ${env('DISPATCH_ID')}` : '',
+    callerRunUrl ? `**来源 workflow**: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
+    env('CALLER_SHA') ? `**来源 SHA**: ${env('CALLER_SHA')}` : '',
     '',
     resultLines.join('\n') || 'No package result files were found.',
-  ].join('\n');
+  ].filter((line) => line !== '').join('\n');
 
   const payload = {
     msg_type: 'interactive',
