@@ -50,18 +50,25 @@ on:
         description: "Optional caller commit SHA"
         required: false
         default: ""
+      dispatch_payload:
+        description: "Optional upstream dispatch metadata JSON"
+        required: false
+        default: ""
 
 jobs:
   resolve-targets:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
-      count: ${{ steps.resolve-targets.outputs.count }}
-      runnable_count: ${{ steps.resolve-targets.outputs.runnable_count }}
-      missing_count: ${{ steps.resolve-targets.outputs.missing_count }}
-      packages_json: ${{ steps.resolve-targets.outputs.packages_json }}
-      missing_targets_json: ${{ steps.resolve-targets.outputs.missing_targets_json }}
-      matrix: ${{ steps.resolve-targets.outputs.matrix }}
+      event_type: ${{ steps.resolve-event.outputs.event_type }}
+      notification_only: ${{ steps.resolve-event.outputs.notification_only }}
+      dispatch_payload_json: ${{ steps.resolve-event.outputs.dispatch_payload_json }}
+      count: ${{ steps.resolve-targets.outputs.count || steps.resolve-event.outputs.count }}
+      runnable_count: ${{ steps.resolve-targets.outputs.runnable_count || steps.resolve-event.outputs.runnable_count }}
+      missing_count: ${{ steps.resolve-targets.outputs.missing_count || steps.resolve-event.outputs.missing_count }}
+      packages_json: ${{ steps.resolve-targets.outputs.packages_json || steps.resolve-event.outputs.packages_json }}
+      missing_targets_json: ${{ steps.resolve-targets.outputs.missing_targets_json || steps.resolve-event.outputs.missing_targets_json }}
+      matrix: ${{ steps.resolve-targets.outputs.matrix || steps.resolve-event.outputs.matrix }}
     env:
       TARGETS: ${{ inputs.targets }}
       NOCOBASE_DOCKER_VERSION: ${{ inputs.nocobase_version }}
@@ -70,12 +77,24 @@ jobs:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       DRY_RUN: ${{ inputs.dry_run }}
+      DISPATCH_PAYLOAD: ${{ inputs.dispatch_payload }}
 
     steps:
       - name: Checkout worker repo
         uses: actions/checkout@v4
 
+      - name: Resolve worker event
+        id: resolve-event
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/resolve-worker-event.mjs \
+            --payload "$DISPATCH_PAYLOAD" \
+            --output "$RUNNER_TEMP/worker-event.json" \
+            --github-output "$GITHUB_OUTPUT"
+
       - name: Validate configuration
+        if: ${{ steps.resolve-event.outputs.notification_only != 'true' }}
         env:
           NOCOBASE_E2E_TOKEN: ${{ secrets.NOCOBASE_E2E_TOKEN }}
         shell: bash
@@ -101,6 +120,7 @@ jobs:
           echo "Configuration OK"
 
       - name: Checkout E2E repo
+        if: ${{ steps.resolve-event.outputs.notification_only != 'true' }}
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.e2e_repo }}
@@ -110,11 +130,13 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node.js
+        if: ${{ steps.resolve-event.outputs.notification_only != 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
       - name: Resolve E2E targets
+        if: ${{ steps.resolve-event.outputs.notification_only != 'true' }}
         id: resolve-targets
         shell: bash
         run: |
@@ -126,7 +148,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
 
       - name: Print dry-run summary
-        if: ${{ inputs.dry_run }}
+        if: ${{ inputs.dry_run && steps.resolve-event.outputs.notification_only != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -137,7 +159,7 @@ jobs:
 
   test:
     needs: resolve-targets
-    if: ${{ !inputs.dry_run && needs.resolve-targets.outputs.runnable_count != '0' }}
+    if: ${{ !inputs.dry_run && needs.resolve-targets.outputs.event_type == 'test' && needs.resolve-targets.outputs.runnable_count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -282,6 +304,7 @@ jobs:
       TARGETS: ${{ inputs.targets }}
       TARGET_MATRIX: ${{ needs.resolve-targets.outputs.matrix }}
       MISSING_TARGETS_JSON: ${{ needs.resolve-targets.outputs.missing_targets_json }}
+      DISPATCH_PAYLOAD: ${{ needs.resolve-targets.outputs.dispatch_payload_json }}
       NOCOBASE_DOCKER_VERSION: ${{ inputs.nocobase_version }}
       E2E_REPO: ${{ inputs.e2e_repo }}
       E2E_REF: ${{ inputs.e2e_ref }}

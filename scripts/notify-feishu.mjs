@@ -22,6 +22,18 @@ function env(name, fallback = '') {
   return process.env[name] || fallback;
 }
 
+function clean(value) {
+  return String(value || '').trim();
+}
+
+function truncate(value, maxLength = 1200) {
+  const text = clean(value);
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...`;
+}
+
 function readJsonFiles(dir) {
   if (!fs.existsSync(dir)) {
     return [];
@@ -66,6 +78,46 @@ function parseMissingTargets() {
   }
 }
 
+function parseDispatchPayload() {
+  const raw = env('DISPATCH_PAYLOAD');
+  if (!raw) {
+    return {
+      event_type: 'test',
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('dispatch_payload must be a JSON object');
+    }
+    return {
+      ...parsed,
+      event_type: clean(parsed.event_type || 'test'),
+    };
+  } catch (error) {
+    return {
+      event_type: 'resolver_failed',
+      resolver: {
+        error: `Invalid dispatch_payload JSON: ${error.message}`,
+      },
+    };
+  }
+}
+
+function dispatchId(payload) {
+  return clean(payload.dispatch_id || payload.dispatchId || env('DISPATCH_ID'));
+}
+
+function caller(payload) {
+  const payloadCaller = payload.caller || {};
+  return {
+    repo: clean(payloadCaller.repo || env('CALLER_REPO')),
+    runId: clean(payloadCaller.run_id || payloadCaller.runId || env('CALLER_RUN_ID')),
+    sha: clean(payloadCaller.sha || env('CALLER_SHA')),
+  };
+}
+
 function icon(conclusion) {
   switch (conclusion) {
     case 'success':
@@ -93,7 +145,38 @@ function cardTemplate(conclusion) {
   return 'red';
 }
 
-function summarize(expectedPackages, resultFiles, missingTargets) {
+function title(summary) {
+  if (summary.eventType === 'skipped') {
+    return 'NocoBase E2E skipped';
+  }
+  if (summary.eventType === 'resolver_failed') {
+    return 'NocoBase E2E resolver failed';
+  }
+  return `NocoBase E2E ${summary.conclusion}`;
+}
+
+function summarize(expectedPackages, resultFiles, missingTargets, payload) {
+  const eventType = payload.event_type || 'test';
+  if (eventType === 'skipped') {
+    return {
+      conclusion: 'success',
+      eventType,
+      rows: [],
+      missingTargets: [],
+      payload,
+    };
+  }
+
+  if (eventType === 'resolver_failed') {
+    return {
+      conclusion: 'failure',
+      eventType,
+      rows: [],
+      missingTargets: [],
+      payload,
+    };
+  }
+
   const byPackage = new Map();
   for (const result of resultFiles) {
     byPackage.set(result.packageDir, result);
@@ -132,25 +215,55 @@ function summarize(expectedPackages, resultFiles, missingTargets) {
     conclusion = 'failure';
   }
 
-  return { conclusion, rows, missingTargets };
+  return { conclusion, eventType, rows, missingTargets, payload };
 }
 
 function markdownSummary(summary) {
   const runUrl = env('RUN_URL');
-  const callerRepo = env('CALLER_REPO');
-  const callerRunId = env('CALLER_RUN_ID');
+  const source = caller(summary.payload);
+  const callerRepo = source.repo;
+  const callerRunId = source.runId;
   const callerRunUrl = callerRepo && callerRunId ? `https://github.com/${callerRepo}/actions/runs/${callerRunId}` : '';
+  const resolver = summary.payload.resolver || {};
   const lines = [
-    `# NocoBase E2E ${summary.conclusion}`,
+    `# ${title(summary)}`,
     '',
     `- targets: ${env('TARGETS')}`,
     `- image version: ${env('NOCOBASE_DOCKER_VERSION')}`,
     `- E2E ref: ${env('E2E_REPO')}@${env('E2E_REF')}`,
     `- run: ${runUrl}`,
-    env('DISPATCH_ID') ? `- dispatch id: ${env('DISPATCH_ID')}` : '',
+    dispatchId(summary.payload) ? `- dispatch id: ${dispatchId(summary.payload)}` : '',
     callerRunUrl ? `- caller: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
-    env('CALLER_SHA') ? `- caller sha: ${env('CALLER_SHA')}` : '',
+    source.sha ? `- caller sha: ${source.sha}` : '',
   ].filter((line) => line !== '');
+
+  if (summary.eventType === 'skipped') {
+    lines.push('');
+    lines.push('## Skipped');
+    lines.push('');
+    lines.push('此次构建无需触发端到端测试。');
+    lines.push('');
+    lines.push('原因：');
+    lines.push(resolver.reason_text || '所有 changed files 都命中 ignored-doc-or-config 规则。');
+    lines.push('');
+    lines.push('规则范围：');
+    lines.push(resolver.rule_scope || 'docs/**、.github/**、*.md、README.md、.node-version 等文档或配置文件变更不触发 E2E。');
+  }
+
+  if (summary.eventType === 'resolver_failed') {
+    lines.push('');
+    lines.push('## Resolver Failed');
+    lines.push('');
+    lines.push('上游 targets 解析失败，无法判断本次构建应该触发哪些 E2E 包。');
+    lines.push('');
+    lines.push('错误摘要：');
+    lines.push('');
+    lines.push('```text');
+    lines.push(truncate(resolver.error || resolver.log || 'Unknown resolver error.'));
+    lines.push('```');
+    lines.push('');
+    lines.push('排查入口：请查看来源 workflow 的 dispatch-e2e / Resolve E2E targets 日志。');
+  }
 
   if (summary.missingTargets.length > 0) {
     lines.push('');
@@ -189,10 +302,12 @@ function feishuSign(secret, timestamp) {
 
 function buildFeishuPayload(summary) {
   const runUrl = env('RUN_URL');
-  const title = `NocoBase E2E ${summary.conclusion}`;
-  const callerRepo = env('CALLER_REPO');
-  const callerRunId = env('CALLER_RUN_ID');
+  const cardTitle = title(summary);
+  const source = caller(summary.payload);
+  const callerRepo = source.repo;
+  const callerRunId = source.runId;
   const callerRunUrl = callerRepo && callerRunId ? `https://github.com/${callerRepo}/actions/runs/${callerRunId}` : '';
+  const resolver = summary.payload.resolver || {};
   const resultLines = summary.rows.map((row) => {
     const reportUrl = row.artifacts?.playwrightReport?.url;
     const testResultsUrl = row.artifacts?.testResults?.url;
@@ -205,17 +320,29 @@ function buildFeishuPayload(summary) {
   const missingLines = summary.missingTargets.map((item) => (
     `${icon('missing')} ${item.packageName || item.packageDir}: ${item.message || item.reason || 'missing'}`
   ));
+  const eventLines = [];
+  if (summary.eventType === 'skipped') {
+    eventLines.push('**结果**: 此次构建无需触发端到端测试。');
+    eventLines.push(`**原因**: ${resolver.reason_text || '所有 changed files 都命中 ignored-doc-or-config 规则。'}`);
+    eventLines.push(`**规则范围**: ${resolver.rule_scope || 'docs/**、.github/**、*.md、README.md、.node-version 等文档或配置文件变更不触发 E2E。'}`);
+  }
+  if (summary.eventType === 'resolver_failed') {
+    eventLines.push('**错误类型**: 上游 targets 解析失败，无法判断本次构建应该触发哪些 E2E 包。');
+    eventLines.push(`**错误摘要**: ${truncate(resolver.error || resolver.log || 'Unknown resolver error.', 900)}`);
+    eventLines.push('**排查入口**: 请查看来源 workflow 的 dispatch-e2e / Resolve E2E targets 日志。');
+  }
   const content = [
     `**镜像版本**: ${env('NOCOBASE_DOCKER_VERSION')}`,
     `**E2E 分支**: ${env('E2E_REPO')}@${env('E2E_REF')}`,
     `**触发目标**: ${env('TARGETS')}`,
-    env('DISPATCH_ID') ? `**Dispatch ID**: ${env('DISPATCH_ID')}` : '',
+    dispatchId(summary.payload) ? `**Dispatch ID**: ${dispatchId(summary.payload)}` : '',
     callerRunUrl ? `**来源 workflow**: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
-    env('CALLER_SHA') ? `**来源 SHA**: ${env('CALLER_SHA')}` : '',
+    source.sha ? `**来源 SHA**: ${source.sha}` : '',
     '',
+    eventLines.length ? eventLines.join('\n') : '',
     missingLines.length ? `**缺失测试包**\n${missingLines.join('\n')}` : '',
     resultLines.length ? `**测试结果**\n${resultLines.join('\n')}` : '',
-    !missingLines.length && !resultLines.length ? 'No package result files were found.' : '',
+    !eventLines.length && !missingLines.length && !resultLines.length ? 'No package result files were found.' : '',
   ].filter((line) => line !== '').join('\n');
 
   const payload = {
@@ -228,7 +355,7 @@ function buildFeishuPayload(summary) {
         template: cardTemplate(summary.conclusion),
         title: {
           tag: 'plain_text',
-          content: title,
+          content: cardTitle,
         },
       },
       elements: [
@@ -299,8 +426,9 @@ try {
 
   const expectedPackages = parseExpectedPackages();
   const missingTargets = parseMissingTargets();
+  const dispatchPayload = parseDispatchPayload();
   const resultFiles = readJsonFiles(resultsDir);
-  const summary = summarize(expectedPackages, resultFiles, missingTargets);
+  const summary = summarize(expectedPackages, resultFiles, missingTargets, dispatchPayload);
   const markdown = markdownSummary(summary);
 
   console.log(markdown);
