@@ -11,6 +11,10 @@ Targets:
   *                         Resolve all packages with scripts.test:e2e
   plugin-block-iframe       Resolve packages/plugin-block-iframe
   plugin-a,plugin-b         Resolve multiple package names
+
+Named targets that do not exist or do not expose scripts.test:e2e are reported as
+missing targets instead of failing this resolver. The worker can still notify the
+caller without running a test job.
 `);
 }
 
@@ -78,16 +82,36 @@ function listAllE2EPackages(repoDir) {
 }
 
 function resolveNamedTargets(repoDir, targets) {
-  return targets.split(',').map(normalizeTargetName).filter(Boolean).map((packagePath) => {
+  const resolved = [];
+  const missing = [];
+
+  for (const packagePath of targets.split(',').map(normalizeTargetName).filter(Boolean)) {
     const absolutePackageDir = path.join(repoDir, packagePath);
     if (!fs.existsSync(path.join(absolutePackageDir, 'package.json'))) {
-      throw new Error(`Target package does not exist: ${packagePath}`);
+      missing.push({
+        packageDir: packagePath,
+        packageName: path.basename(packagePath),
+        reason: 'not_found',
+        message: `Target package does not exist: ${packagePath}`,
+      });
+      continue;
     }
     if (!hasE2EScript(absolutePackageDir)) {
-      throw new Error(`Target package has no scripts.test:e2e: ${packagePath}`);
+      missing.push({
+        packageDir: packagePath,
+        packageName: path.basename(packagePath),
+        reason: 'no_test_e2e_script',
+        message: `Target package has no scripts.test:e2e: ${packagePath}`,
+      });
+      continue;
     }
-    return packagePath;
-  });
+    resolved.push(packagePath);
+  }
+
+  return {
+    resolved,
+    missing,
+  };
 }
 
 function unique(items) {
@@ -96,6 +120,19 @@ function unique(items) {
   for (const item of items) {
     if (!seen.has(item)) {
       seen.add(item);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+function uniqueMissingTargets(items) {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    const key = `${item.packageDir}:${item.reason}`;
+    if (!seen.has(key)) {
+      seen.add(key);
       result.push(item);
     }
   }
@@ -144,23 +181,44 @@ try {
     throw new Error(`E2E repo directory does not exist: ${repoDir}`);
   }
 
-  const resolved = unique(targets === '*' ? listAllE2EPackages(repoDir) : resolveNamedTargets(repoDir, targets));
+  const targetResult = targets === '*'
+    ? { resolved: listAllE2EPackages(repoDir), missing: [] }
+    : resolveNamedTargets(repoDir, targets);
+  const resolved = unique(targetResult.resolved);
+  const missing = uniqueMissingTargets(targetResult.missing);
 
-  if (resolved.length === 0) {
+  if (resolved.length === 0 && missing.length === 0) {
     throw new Error(`No E2E target packages resolved from targets="${targets}"`);
   }
 
-  fs.writeFileSync(outputFile, `${resolved.join('\n')}\n`);
+  const outputLines = [
+    '# runnable',
+    ...resolved,
+    '',
+    '# missing',
+    ...missing.map((item) => `${item.packageDir} ${item.reason}`),
+  ];
+  fs.writeFileSync(outputFile, `${outputLines.join('\n')}\n`);
   writeGithubOutput(githubOutputFile, {
     count: String(resolved.length),
+    runnable_count: String(resolved.length),
+    missing_count: String(missing.length),
     packages: resolved,
     packages_json: JSON.stringify(resolved),
+    missing_targets: missing.map((item) => `${item.packageDir}: ${item.message}`),
+    missing_targets_json: JSON.stringify(missing),
     matrix: JSON.stringify(toMatrix(resolved)),
   });
 
   console.log(`Resolved ${resolved.length} E2E package(s):`);
   for (const packagePath of resolved) {
     console.log(`- ${packagePath}`);
+  }
+  if (missing.length > 0) {
+    console.log(`Missing ${missing.length} E2E target(s):`);
+    for (const item of missing) {
+      console.log(`- ${item.packageDir}: ${item.message}`);
+    }
   }
 } catch (error) {
   console.error(`::error::${error.message}`);

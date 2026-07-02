@@ -53,6 +53,19 @@ function parseExpectedPackages() {
   }
 }
 
+function parseMissingTargets() {
+  const raw = env('MISSING_TARGETS_JSON');
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function icon(conclusion) {
   switch (conclusion) {
     case 'success':
@@ -63,6 +76,8 @@ function icon(conclusion) {
       return '[CANCELLED]';
     case 'skipped':
       return '[SKIPPED]';
+    case 'missing':
+      return '[MISSING]';
     default:
       return '[UNKNOWN]';
   }
@@ -78,7 +93,7 @@ function cardTemplate(conclusion) {
   return 'red';
 }
 
-function summarize(expectedPackages, resultFiles) {
+function summarize(expectedPackages, resultFiles, missingTargets) {
   const byPackage = new Map();
   for (const result of resultFiles) {
     byPackage.set(result.packageDir, result);
@@ -103,7 +118,11 @@ function summarize(expectedPackages, resultFiles) {
   }
 
   let conclusion = 'success';
-  if (rows.length === 0) {
+  if (missingTargets.length > 0) {
+    conclusion = 'failure';
+  } else if (env('RESOLVE_RESULT') !== 'success') {
+    conclusion = 'failure';
+  } else if (rows.length === 0) {
     conclusion = env('TEST_RESULT') === 'success' ? 'success' : 'failure';
   } else if (rows.some((row) => row.conclusion === 'failure' || row.conclusion === 'unknown')) {
     conclusion = 'failure';
@@ -113,7 +132,7 @@ function summarize(expectedPackages, resultFiles) {
     conclusion = 'failure';
   }
 
-  return { conclusion, rows };
+  return { conclusion, rows, missingTargets };
 }
 
 function markdownSummary(summary) {
@@ -131,17 +150,32 @@ function markdownSummary(summary) {
     env('DISPATCH_ID') ? `- dispatch id: ${env('DISPATCH_ID')}` : '',
     callerRunUrl ? `- caller: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
     env('CALLER_SHA') ? `- caller sha: ${env('CALLER_SHA')}` : '',
-    '',
-    '| Package | Result | Report | Test results |',
-    '| --- | --- | --- | --- |',
   ].filter((line) => line !== '');
 
-  for (const row of summary.rows) {
-    const reportUrl = row.artifacts?.playwrightReport?.url;
-    const testResultsUrl = row.artifacts?.testResults?.url;
-    lines.push(
-      `| ${row.packageName || row.packageDir} | ${icon(row.conclusion)} ${row.conclusion} | ${reportUrl ? `[download](${reportUrl})` : '-'} | ${testResultsUrl ? `[download](${testResultsUrl})` : '-'} |`,
-    );
+  if (summary.missingTargets.length > 0) {
+    lines.push('');
+    lines.push('## Missing E2E targets');
+    lines.push('');
+    lines.push('| Target | Reason |');
+    lines.push('| --- | --- |');
+    for (const item of summary.missingTargets) {
+      lines.push(`| ${item.packageName || item.packageDir} | ${item.message || item.reason || 'missing'} |`);
+    }
+  }
+
+  if (summary.rows.length > 0) {
+    lines.push('');
+    lines.push('## Package results');
+    lines.push('');
+    lines.push('| Package | Result | Report | Test results |');
+    lines.push('| --- | --- | --- | --- |');
+    for (const row of summary.rows) {
+      const reportUrl = row.artifacts?.playwrightReport?.url;
+      const testResultsUrl = row.artifacts?.testResults?.url;
+      lines.push(
+        `| ${row.packageName || row.packageDir} | ${icon(row.conclusion)} ${row.conclusion} | ${reportUrl ? `[download](${reportUrl})` : '-'} | ${testResultsUrl ? `[download](${testResultsUrl})` : '-'} |`,
+      );
+    }
   }
 
   lines.push('');
@@ -168,6 +202,9 @@ function buildFeishuPayload(summary) {
     ].filter(Boolean);
     return `${icon(row.conclusion)} ${row.packageName || row.packageDir}: ${row.conclusion}${links.length ? ` ${links.join(' ')}` : ''}`;
   });
+  const missingLines = summary.missingTargets.map((item) => (
+    `${icon('missing')} ${item.packageName || item.packageDir}: ${item.message || item.reason || 'missing'}`
+  ));
   const content = [
     `**镜像版本**: ${env('NOCOBASE_DOCKER_VERSION')}`,
     `**E2E 分支**: ${env('E2E_REPO')}@${env('E2E_REF')}`,
@@ -176,7 +213,9 @@ function buildFeishuPayload(summary) {
     callerRunUrl ? `**来源 workflow**: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
     env('CALLER_SHA') ? `**来源 SHA**: ${env('CALLER_SHA')}` : '',
     '',
-    resultLines.join('\n') || 'No package result files were found.',
+    missingLines.length ? `**缺失测试包**\n${missingLines.join('\n')}` : '',
+    resultLines.length ? `**测试结果**\n${resultLines.join('\n')}` : '',
+    !missingLines.length && !resultLines.length ? 'No package result files were found.' : '',
   ].filter((line) => line !== '').join('\n');
 
   const payload = {
@@ -259,8 +298,9 @@ try {
   }
 
   const expectedPackages = parseExpectedPackages();
+  const missingTargets = parseMissingTargets();
   const resultFiles = readJsonFiles(resultsDir);
-  const summary = summarize(expectedPackages, resultFiles);
+  const summary = summarize(expectedPackages, resultFiles, missingTargets);
   const markdown = markdownSummary(summary);
 
   console.log(markdown);

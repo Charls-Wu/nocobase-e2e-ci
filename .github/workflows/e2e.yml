@@ -57,7 +57,10 @@ jobs:
     timeout-minutes: 15
     outputs:
       count: ${{ steps.resolve-targets.outputs.count }}
+      runnable_count: ${{ steps.resolve-targets.outputs.runnable_count }}
+      missing_count: ${{ steps.resolve-targets.outputs.missing_count }}
       packages_json: ${{ steps.resolve-targets.outputs.packages_json }}
+      missing_targets_json: ${{ steps.resolve-targets.outputs.missing_targets_json }}
       matrix: ${{ steps.resolve-targets.outputs.matrix }}
     env:
       TARGETS: ${{ inputs.targets }}
@@ -90,14 +93,6 @@ jobs:
           }
 
           require NOCOBASE_E2E_TOKEN
-
-          if [ "$DRY_RUN" != "true" ]; then
-            require DOCKER_REGISTRY
-            require DOCKER_USERNAME
-            require DOCKER_PASSWORD
-            require NOCOBASE_DOCKER_IMAGE
-            require NOCOBASE_DOCKER_VERSION
-          fi
 
           if [ "$missing" -ne 0 ]; then
             exit 1
@@ -142,7 +137,7 @@ jobs:
 
   test:
     needs: resolve-targets
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && needs.resolve-targets.outputs.runnable_count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -162,6 +157,31 @@ jobs:
       PACKAGE_NAME: ${{ matrix.package_name }}
 
     steps:
+      - name: Validate Docker configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=0
+          require() {
+            local name="$1"
+            local value="${!name:-}"
+            if [ -z "$value" ]; then
+              echo "::error::Missing required configuration: $name"
+              missing=1
+            fi
+          }
+
+          require DOCKER_REGISTRY
+          require DOCKER_USERNAME
+          require DOCKER_PASSWORD
+          require NOCOBASE_DOCKER_IMAGE
+          require NOCOBASE_DOCKER_VERSION
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
       - name: Checkout worker repo
         id: checkout-worker
         uses: actions/checkout@v4
@@ -261,6 +281,7 @@ jobs:
     env:
       TARGETS: ${{ inputs.targets }}
       TARGET_MATRIX: ${{ needs.resolve-targets.outputs.matrix }}
+      MISSING_TARGETS_JSON: ${{ needs.resolve-targets.outputs.missing_targets_json }}
       NOCOBASE_DOCKER_VERSION: ${{ inputs.nocobase_version }}
       E2E_REPO: ${{ inputs.e2e_repo }}
       E2E_REF: ${{ inputs.e2e_ref }}
