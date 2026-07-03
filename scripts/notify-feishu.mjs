@@ -139,6 +139,9 @@ function cardTemplate(conclusion) {
   if (conclusion === 'success') {
     return 'green';
   }
+  if (conclusion === 'missing') {
+    return 'yellow';
+  }
   if (conclusion === 'cancelled') {
     return 'grey';
   }
@@ -151,6 +154,9 @@ function title(summary) {
   }
   if (summary.eventType === 'resolver_failed') {
     return 'NocoBase E2E resolver failed';
+  }
+  if (summary.conclusion === 'missing') {
+    return 'NocoBase E2E missing targets';
   }
   return `NocoBase E2E ${summary.conclusion}`;
 }
@@ -201,18 +207,20 @@ function summarize(expectedPackages, resultFiles, missingTargets, payload) {
   }
 
   let conclusion = 'success';
-  if (missingTargets.length > 0) {
-    conclusion = 'failure';
-  } else if (env('RESOLVE_RESULT') !== 'success') {
+  if (env('RESOLVE_RESULT') !== 'success') {
     conclusion = 'failure';
   } else if (rows.length === 0) {
-    conclusion = env('TEST_RESULT') === 'success' ? 'success' : 'failure';
+    conclusion = missingTargets.length > 0
+      ? 'missing'
+      : env('TEST_RESULT') === 'success' ? 'success' : 'failure';
   } else if (rows.some((row) => row.conclusion === 'failure' || row.conclusion === 'unknown')) {
     conclusion = 'failure';
   } else if (rows.some((row) => row.conclusion === 'cancelled')) {
     conclusion = 'cancelled';
   } else if (rows.some((row) => row.conclusion !== 'success')) {
     conclusion = 'failure';
+  } else if (missingTargets.length > 0) {
+    conclusion = 'missing';
   }
 
   return { conclusion, eventType, rows, missingTargets, payload };
