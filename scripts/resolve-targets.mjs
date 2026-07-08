@@ -10,6 +10,8 @@ function usage() {
 Targets:
   *                         Resolve all packages with scripts.test:e2e
   plugin-block-iframe       Resolve packages/plugin-block-iframe
+  plugin-ai                 Resolve all runnable packages under packages/plugin-ai
+  packages/plugin-ai/foo    Resolve a nested package directory
   plugin-a,plugin-b         Resolve multiple package names
 
 Named targets that do not exist or do not expose scripts.test:e2e are reported as
@@ -52,7 +54,7 @@ function normalizeTargetName(rawTarget) {
     return '';
   }
 
-  if (target.includes('\\') || target.includes('..')) {
+  if (target.includes('\\') || target.split('/').includes('..') || path.isAbsolute(target)) {
     throw new Error(`Invalid target "${target}": path traversal is not allowed`);
   }
 
@@ -60,11 +62,32 @@ function normalizeTargetName(rawTarget) {
     return target.replace(/\/+$/, '');
   }
 
-  if (target.includes('/')) {
-    throw new Error(`Invalid target "${target}": use a package name or packages/<name>`);
+  return `packages/${target.replace(/\/+$/, '')}`;
+}
+
+function listRunnableE2EPackages(repoDir, relativeRoot = 'packages') {
+  const absoluteRoot = path.join(repoDir, relativeRoot);
+  if (!fs.existsSync(absoluteRoot)) {
+    return [];
   }
 
-  return `packages/${target}`;
+  const results = [];
+  const entries = fs.readdirSync(absoluteRoot, { withFileTypes: true });
+  if (hasE2EScript(absoluteRoot)) {
+    results.push(relativeRoot);
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
+      continue;
+    }
+    results.push(...listRunnableE2EPackages(repoDir, path.posix.join(relativeRoot, entry.name)));
+  }
+
+  return results.sort();
 }
 
 function listAllE2EPackages(repoDir) {
@@ -73,12 +96,15 @@ function listAllE2EPackages(repoDir) {
     throw new Error(`Missing packages directory: ${packagesDir}`);
   }
 
-  return fs
-    .readdirSync(packagesDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => `packages/${entry.name}`)
-    .filter((packagePath) => hasE2EScript(path.join(repoDir, packagePath)))
-    .sort();
+  return listRunnableE2EPackages(repoDir);
+}
+
+function displayPackageName(packagePath) {
+  return packagePath.replace(/^packages\//, '');
+}
+
+function artifactPackageKey(packagePath) {
+  return displayPackageName(packagePath).replace(/[^A-Za-z0-9_.-]+/g, '__');
 }
 
 function resolveNamedTargets(repoDir, targets) {
@@ -87,19 +113,31 @@ function resolveNamedTargets(repoDir, targets) {
 
   for (const packagePath of targets.split(',').map(normalizeTargetName).filter(Boolean)) {
     const absolutePackageDir = path.join(repoDir, packagePath);
+    const runnableChildren = fs.existsSync(absolutePackageDir)
+      ? listRunnableE2EPackages(repoDir, packagePath)
+      : [];
+
     if (!fs.existsSync(path.join(absolutePackageDir, 'package.json'))) {
+      if (runnableChildren.length > 0) {
+        resolved.push(...runnableChildren);
+        continue;
+      }
       missing.push({
         packageDir: packagePath,
-        packageName: path.basename(packagePath),
+        packageName: displayPackageName(packagePath),
         reason: 'not_found',
         message: `Target package does not exist: ${packagePath}`,
       });
       continue;
     }
     if (!hasE2EScript(absolutePackageDir)) {
+      if (runnableChildren.length > 0) {
+        resolved.push(...runnableChildren);
+        continue;
+      }
       missing.push({
         packageDir: packagePath,
-        packageName: path.basename(packagePath),
+        packageName: displayPackageName(packagePath),
         reason: 'no_test_e2e_script',
         message: `Target package has no scripts.test:e2e: ${packagePath}`,
       });
@@ -143,7 +181,8 @@ function toMatrix(resolved) {
   return {
     include: resolved.map((packagePath) => ({
       package_dir: packagePath,
-      package_name: path.basename(packagePath),
+      package_name: displayPackageName(packagePath),
+      package_key: artifactPackageKey(packagePath),
     })),
   };
 }

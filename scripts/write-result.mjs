@@ -31,6 +31,7 @@ if (!outputFile) {
 
 const packageDir = env('PACKAGE_DIR');
 const packageName = env('PACKAGE_NAME') || path.basename(packageDir);
+const packageKey = env('PACKAGE_KEY') || packageName.replace(/[^A-Za-z0-9_.-]+/g, '__');
 const outcomes = {
   checkoutWorker: env('CHECKOUT_WORKER_OUTCOME'),
   checkoutE2E: env('CHECKOUT_E2E_OUTCOME'),
@@ -42,6 +43,7 @@ const outcomes = {
 const result = {
   packageDir,
   packageName,
+  packageKey,
   conclusion: pickConclusion(outcomes),
   outcomes,
   artifacts: {

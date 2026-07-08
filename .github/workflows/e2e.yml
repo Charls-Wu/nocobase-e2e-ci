@@ -177,6 +177,7 @@ jobs:
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       PACKAGE_DIR: ${{ matrix.package_dir }}
       PACKAGE_NAME: ${{ matrix.package_name }}
+      PACKAGE_KEY: ${{ matrix.package_key }}
 
     steps:
       - name: Validate Docker configuration
@@ -248,7 +249,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.package_name }}
+          name: playwright-report-${{ matrix.package_key }}
           path: e2e/${{ matrix.package_dir }}/playwright-report/
           if-no-files-found: ignore
           retention-days: 7
@@ -258,7 +259,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.package_name }}
+          name: test-results-${{ matrix.package_key }}
           path: e2e/${{ matrix.package_dir }}/test-results/
           if-no-files-found: ignore
           retention-days: 7
@@ -283,7 +284,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-result-${{ matrix.package_name }}
+          name: e2e-result-${{ matrix.package_key }}
           path: ${{ runner.temp }}/e2e-result/result.json
           if-no-files-found: error
           retention-days: 7
