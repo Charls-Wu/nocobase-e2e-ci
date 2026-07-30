@@ -115,24 +115,64 @@ function caller(payload) {
     repo: clean(payloadCaller.repo || env('CALLER_REPO')),
     runId: clean(payloadCaller.run_id || payloadCaller.runId || env('CALLER_RUN_ID')),
     sha: clean(payloadCaller.sha || env('CALLER_SHA')),
+    actor: clean(payloadCaller.actor || env('CALLER_ACTOR')),
   };
+}
+
+async function resolveTriggerActor(payload) {
+  const source = caller(payload);
+  if (source.actor) {
+    return source.actor;
+  }
+
+  if (source.repo && source.runId) {
+    const token = env('CALLER_LOOKUP_TOKEN');
+    const response = await fetch(`https://api.github.com/repos/${source.repo}/actions/runs/${source.runId}`, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        'user-agent': 'nocobase-e2e-notifier',
+        'x-github-api-version': '2022-11-28',
+      },
+    }).catch(() => null);
+
+    if (response?.ok) {
+      const run = await response.json().catch(() => ({}));
+      const actor = clean(run.triggering_actor?.login || run.actor?.login);
+      if (actor) {
+        return actor;
+      }
+    } else if (response) {
+      console.warn(`Unable to resolve caller actor: GitHub API returned HTTP ${response.status}.`);
+    }
+  }
+
+  return clean(env('WORKER_TRIGGER_ACTOR'));
 }
 
 function icon(conclusion) {
   switch (conclusion) {
     case 'success':
-      return '[OK]';
+      return '🟢 [OK]';
     case 'failure':
-      return '[FAIL]';
+      return '🔴 [FAIL]';
     case 'cancelled':
-      return '[CANCELLED]';
+      return '⚪ [CANCELLED]';
     case 'skipped':
-      return '[SKIPPED]';
+      return '⚪ [SKIPPED]';
     case 'missing':
-      return '[MISSING]';
+      return '🟡 [MISSING]';
     default:
-      return '[UNKNOWN]';
+      return '🟡 [UNKNOWN]';
   }
+}
+
+function resultCounts(summary) {
+  return {
+    success: summary.rows.filter((row) => row.conclusion === 'success').length,
+    failure: summary.rows.filter((row) => row.conclusion === 'failure').length,
+    missing: summary.missingTargets.length + summary.rows.filter((row) => row.conclusion === 'missing').length,
+  };
 }
 
 function cardTemplate(conclusion) {
@@ -233,6 +273,7 @@ function markdownSummary(summary) {
   const callerRunId = source.runId;
   const callerRunUrl = callerRepo && callerRunId ? `https://github.com/${callerRepo}/actions/runs/${callerRunId}` : '';
   const resolver = summary.payload.resolver || {};
+  const counts = resultCounts(summary);
   const lines = [
     `# ${title(summary)}`,
     '',
@@ -243,6 +284,8 @@ function markdownSummary(summary) {
     dispatchId(summary.payload) ? `- dispatch id: ${dispatchId(summary.payload)}` : '',
     callerRunUrl ? `- caller: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
     source.sha ? `- caller sha: ${source.sha}` : '',
+    summary.triggerActor ? `- triggered by: [${summary.triggerActor}](https://github.com/${summary.triggerActor})` : '',
+    `- results: ${counts.success} success / ${counts.failure} failure / ${counts.missing} missing`,
   ].filter((line) => line !== '');
 
   if (summary.eventType === 'skipped') {
@@ -316,6 +359,7 @@ function buildFeishuPayload(summary) {
   const callerRunId = source.runId;
   const callerRunUrl = callerRepo && callerRunId ? `https://github.com/${callerRepo}/actions/runs/${callerRunId}` : '';
   const resolver = summary.payload.resolver || {};
+  const counts = resultCounts(summary);
   const resultLines = summary.rows.map((row) => {
     const reportUrl = row.artifacts?.playwrightReport?.url;
     const testResultsUrl = row.artifacts?.testResults?.url;
@@ -346,6 +390,8 @@ function buildFeishuPayload(summary) {
     dispatchId(summary.payload) ? `**Dispatch ID**: ${dispatchId(summary.payload)}` : '',
     callerRunUrl ? `**来源 workflow**: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
     source.sha ? `**来源 SHA**: ${source.sha}` : '',
+    summary.triggerActor ? `**触发人**: [${summary.triggerActor}](https://github.com/${summary.triggerActor})` : '',
+    `**结果概览**: 🟢 成功 ${counts.success} · 🔴 失败 ${counts.failure} · 🟡 缺失 ${counts.missing}`,
     '',
     eventLines.length ? eventLines.join('\n') : '',
     missingLines.length ? `**缺失测试包**\n${missingLines.join('\n')}` : '',
@@ -437,6 +483,7 @@ try {
   const dispatchPayload = parseDispatchPayload();
   const resultFiles = readJsonFiles(resultsDir);
   const summary = summarize(expectedPackages, resultFiles, missingTargets, dispatchPayload);
+  summary.triggerActor = await resolveTriggerActor(dispatchPayload);
   const markdown = markdownSummary(summary);
 
   console.log(markdown);
