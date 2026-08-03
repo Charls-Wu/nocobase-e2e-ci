@@ -115,39 +115,15 @@ function caller(payload) {
     repo: clean(payloadCaller.repo || env('CALLER_REPO')),
     runId: clean(payloadCaller.run_id || payloadCaller.runId || env('CALLER_RUN_ID')),
     sha: clean(payloadCaller.sha || env('CALLER_SHA')),
-    actor: clean(payloadCaller.actor || env('CALLER_ACTOR')),
   };
 }
 
-async function resolveTriggerActor(payload) {
-  const source = caller(payload);
-  if (source.actor) {
-    return source.actor;
+function triggerSource(payload) {
+  const callerRepo = caller(payload).repo.toLowerCase();
+  if (!callerRepo) {
+    return '';
   }
-
-  if (source.repo && source.runId) {
-    const token = env('CALLER_LOOKUP_TOKEN');
-    const response = await fetch(`https://api.github.com/repos/${source.repo}/actions/runs/${source.runId}`, {
-      headers: {
-        accept: 'application/vnd.github+json',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        'user-agent': 'nocobase-e2e-notifier',
-        'x-github-api-version': '2022-11-28',
-      },
-    }).catch(() => null);
-
-    if (response?.ok) {
-      const run = await response.json().catch(() => ({}));
-      const actor = clean(run.triggering_actor?.login || run.actor?.login);
-      if (actor) {
-        return actor;
-      }
-    } else if (response) {
-      console.warn(`Unable to resolve caller actor: GitHub API returned HTTP ${response.status}.`);
-    }
-  }
-
-  return clean(env('WORKER_TRIGGER_ACTOR'));
+  return callerRepo === 'nocobase/e2e' ? 'E2E仓库' : '业务代码';
 }
 
 function icon(conclusion) {
@@ -284,7 +260,7 @@ function markdownSummary(summary) {
     dispatchId(summary.payload) ? `- dispatch id: ${dispatchId(summary.payload)}` : '',
     callerRunUrl ? `- caller: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
     source.sha ? `- caller sha: ${source.sha}` : '',
-    summary.triggerActor ? `- triggered by: [${summary.triggerActor}](https://github.com/${summary.triggerActor})` : '',
+    summary.triggerSource ? `- trigger source: ${summary.triggerSource}` : '',
     `- results: ${counts.success} success / ${counts.failure} failure / ${counts.missing} missing`,
   ].filter((line) => line !== '');
 
@@ -390,7 +366,7 @@ function buildFeishuPayload(summary) {
     dispatchId(summary.payload) ? `**Dispatch ID**: ${dispatchId(summary.payload)}` : '',
     callerRunUrl ? `**来源 workflow**: [${callerRepo}#${callerRunId}](${callerRunUrl})` : '',
     source.sha ? `**来源 SHA**: ${source.sha}` : '',
-    summary.triggerActor ? `**触发人**: [${summary.triggerActor}](https://github.com/${summary.triggerActor})` : '',
+    summary.triggerSource ? `**触发来源**: ${summary.triggerSource}` : '',
     `**结果概览**: 🟢 成功 ${counts.success} · 🔴 失败 ${counts.failure} · 🟡 缺失 ${counts.missing}`,
     '',
     eventLines.length ? eventLines.join('\n') : '',
@@ -483,7 +459,7 @@ try {
   const dispatchPayload = parseDispatchPayload();
   const resultFiles = readJsonFiles(resultsDir);
   const summary = summarize(expectedPackages, resultFiles, missingTargets, dispatchPayload);
-  summary.triggerActor = await resolveTriggerActor(dispatchPayload);
+  summary.triggerSource = triggerSource(dispatchPayload);
   const markdown = markdownSummary(summary);
 
   console.log(markdown);
