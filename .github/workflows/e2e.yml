@@ -175,6 +175,11 @@ jobs:
       DOCKER_REGISTRY: ${{ inputs.docker_registry || vars.DOCKER_REGISTRY }}
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      # Keep transient npm registry failures from aborting package bootstrap.
+      # These settings are inherited by package-level `npm install` commands.
+      NPM_CONFIG_FETCH_RETRIES: "3"
+      NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "5000"
+      NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "30000"
       PACKAGE_DIR: ${{ matrix.package_dir }}
       PACKAGE_NAME: ${{ matrix.package_name }}
       PACKAGE_KEY: ${{ matrix.package_key }}
