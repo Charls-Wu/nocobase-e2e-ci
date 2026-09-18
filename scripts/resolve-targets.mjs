@@ -17,6 +17,11 @@ Targets:
 Named targets that do not exist or do not expose scripts.test:e2e are reported as
 missing targets instead of failing this resolver. The worker can still notify the
 caller without running a test job.
+
+Environment:
+  E2E_EXCLUDE_TARGETS       Comma-separated package names or paths to skip entirely,
+                            for example plugin-ai,plugin-ai-knowledge-base. Excluded
+                            packages are reported separately and never run.
 `);
 }
 
@@ -63,6 +68,21 @@ function normalizeTargetName(rawTarget) {
   }
 
   return `packages/${target.replace(/\/+$/, '')}`;
+}
+
+function parseTargetList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function excludedPackagePrefixes() {
+  return parseTargetList(process.env.E2E_EXCLUDE_TARGETS).map(normalizeTargetName);
+}
+
+function isExcludedPackage(packagePath, excludePrefixes) {
+  return excludePrefixes.some((prefix) => packagePath === prefix || packagePath.startsWith(`${prefix}/`));
 }
 
 function listRunnableE2EPackages(repoDir, relativeRoot = 'packages') {
@@ -223,16 +243,29 @@ try {
   const targetResult = targets === '*'
     ? { resolved: listAllE2EPackages(repoDir), missing: [] }
     : resolveNamedTargets(repoDir, targets);
-  const resolved = unique(targetResult.resolved);
+  const excludePrefixes = excludedPackagePrefixes();
+  const candidates = unique(targetResult.resolved);
+  const resolved = candidates.filter((packagePath) => !isExcludedPackage(packagePath, excludePrefixes));
+  const excluded = candidates
+    .filter((packagePath) => isExcludedPackage(packagePath, excludePrefixes))
+    .map((packagePath) => ({
+      packageDir: packagePath,
+      packageName: displayPackageName(packagePath),
+      reason: 'excluded',
+      message: `Target excluded by E2E_EXCLUDE_TARGETS: ${packagePath}`,
+    }));
   const missing = uniqueMissingTargets(targetResult.missing);
 
-  if (resolved.length === 0 && missing.length === 0) {
+  if (resolved.length === 0 && missing.length === 0 && excluded.length === 0) {
     throw new Error(`No E2E target packages resolved from targets="${targets}"`);
   }
 
   const outputLines = [
     '# runnable',
     ...resolved,
+    '',
+    '# excluded',
+    ...excluded.map((item) => item.packageDir),
     '',
     '# missing',
     ...missing.map((item) => `${item.packageDir} ${item.reason}`),
@@ -241,9 +274,12 @@ try {
   writeGithubOutput(githubOutputFile, {
     count: String(resolved.length),
     runnable_count: String(resolved.length),
+    excluded_count: String(excluded.length),
     missing_count: String(missing.length),
     packages: resolved,
     packages_json: JSON.stringify(resolved),
+    excluded_targets: excluded.map((item) => `${item.packageDir}: ${item.reason}`),
+    excluded_targets_json: JSON.stringify(excluded),
     missing_targets: missing.map((item) => `${item.packageDir}: ${item.message}`),
     missing_targets_json: JSON.stringify(missing),
     matrix: JSON.stringify(toMatrix(resolved)),
@@ -252,6 +288,12 @@ try {
   console.log(`Resolved ${resolved.length} E2E package(s):`);
   for (const packagePath of resolved) {
     console.log(`- ${packagePath}`);
+  }
+  if (excluded.length > 0) {
+    console.log(`Excluded ${excluded.length} E2E target(s) via E2E_EXCLUDE_TARGETS:`);
+    for (const item of excluded) {
+      console.log(`- ${item.packageDir}`);
+    }
   }
   if (missing.length > 0) {
     console.log(`Missing ${missing.length} E2E target(s):`);

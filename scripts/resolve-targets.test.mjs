@@ -35,7 +35,7 @@ function makeFixture() {
   return { dir, repoDir };
 }
 
-function runCase(targets) {
+function runCase(targets, env = {}) {
   const { dir, repoDir } = makeFixture();
   const output = path.join(dir, 'output.txt');
   const githubOutput = path.join(dir, 'github-output.txt');
@@ -50,7 +50,7 @@ function runCase(targets) {
     output,
     '--github-output',
     githubOutput,
-  ]);
+  ], { env: { ...process.env, ...env } });
 
   const rawGithubOutput = fs.readFileSync(githubOutput, 'utf8');
   const matrixMatch = rawGithubOutput.match(/^matrix=(.+)$/m);
@@ -58,6 +58,7 @@ function runCase(targets) {
 
   return {
     output: fs.readFileSync(output, 'utf8'),
+    rawGithubOutput,
     matrix: JSON.parse(matrixMatch[1]),
   };
 }
@@ -89,5 +90,27 @@ assert.deepEqual(
 );
 
 assert.match(runCase('missing-package').output, /# missing\npackages\/missing-package not_found/);
+
+const excludedWildcard = runCase('*', { E2E_EXCLUDE_TARGETS: 'plugin-ai' });
+assert.deepEqual(
+  excludedWildcard.matrix.include.map((item) => item.package_dir),
+  ['packages/plugin-block-iframe'],
+);
+assert.match(
+  excludedWildcard.output,
+  /# excluded\npackages\/plugin-ai\/plugin-ai-chat\npackages\/plugin-ai\/plugin-ai-execution\n\n# missing\n/,
+);
+assert.match(excludedWildcard.rawGithubOutput, /^excluded_count=2$/m);
+assert.match(excludedWildcard.rawGithubOutput, /^missing_count=0$/m);
+
+const excludedNamed = runCase('plugin-ai', { E2E_EXCLUDE_TARGETS: 'plugin-ai' });
+assert.deepEqual(excludedNamed.matrix.include, []);
+assert.match(excludedNamed.rawGithubOutput, /^runnable_count=0$/m);
+assert.match(excludedNamed.rawGithubOutput, /^excluded_count=2$/m);
+
+const excludedEverything = runCase('*', { E2E_EXCLUDE_TARGETS: 'plugin-ai,plugin-block-iframe' });
+assert.deepEqual(excludedEverything.matrix.include, []);
+assert.match(excludedEverything.rawGithubOutput, /^excluded_count=3$/m);
+assert.match(excludedEverything.rawGithubOutput, /^missing_count=0$/m);
 
 console.log('resolve-targets tests passed');

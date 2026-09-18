@@ -57,6 +57,16 @@ DOCKER_REGISTRY
 NOCOBASE_DOCKER_IMAGE
 ```
 
+## Optional Variables
+
+```text
+E2E_EXCLUDE_TARGETS
+  Comma-separated E2E package names or paths to skip for every environment,
+  for example plugin-ai,plugin-ai-knowledge-base.
+  Excluded packages are reported separately, do not run, and do not mark the
+  run as missing. Remove the variable to restore the packages.
+```
+
 ## Workflow Inputs
 
 ```text

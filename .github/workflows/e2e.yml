@@ -78,6 +78,7 @@ jobs:
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       DRY_RUN: ${{ inputs.dry_run }}
       DISPATCH_PAYLOAD: ${{ inputs.dispatch_payload }}
+      E2E_EXCLUDE_TARGETS: ${{ vars.E2E_EXCLUDE_TARGETS }}
 
     steps:
       - name: Checkout worker repo
