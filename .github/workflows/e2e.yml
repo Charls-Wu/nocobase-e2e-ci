@@ -161,7 +161,7 @@ jobs:
   test:
     needs: resolve-targets
     if: ${{ !inputs.dry_run && needs.resolve-targets.outputs.event_type == 'test' && needs.resolve-targets.outputs.runnable_count != '0' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
